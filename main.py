@@ -94,6 +94,7 @@ def peak_ccu():
     # Batch fetch (split if >100)
     current_ccu = 0
     batch_size = 100
+    visits = 0
     for i in range(0, len(universes), batch_size):
         batch = universes[i:i+batch_size]
         ids_str = ','.join(map(str, batch))
@@ -101,6 +102,7 @@ def peak_ccu():
         try:
             resp = requests.get(url).json()
             for game in resp.get('data', []):
+                visits += game.get('visits', 0)
                 current_ccu += game.get('playing', 0)
         except Exception:
             pass  # Handle API errors gracefully
@@ -112,6 +114,7 @@ def peak_ccu():
     return jsonify({
         'current_ccu': current_ccu,
         'peak_ccu': current_peak,
+        'total_visits': format_number(visits),
         'date': peak_date,
         'is_new_day': peak_date != today 
     })
