@@ -98,16 +98,17 @@ def peak_ccu():
             cached["stale"] = False
             return jsonify(cached)
 
-    today = datetime.now(timezone.utc).date().isoformat()
-    current_peak, peak_date = load_peak()
+    # today = datetime.now(timezone.utc).date().isoformat()
+    # current_peak, peak_date = load_peak()
 
-    if peak_date != today:
-        current_peak = 0
-        peak_date = today
+    # if peak_date != today:
+    #     current_peak = 0
+    #     peak_date = today
 
     current_ccu = 0
     visits = 0
     batch_size = 100
+    current_peak, _ = load_peak()
 
     try:
         for i in range(0, len(universes), batch_size):
@@ -120,17 +121,15 @@ def peak_ccu():
             for game in r.json().get('data', []):
                 visits += game.get('visits', 0) or 0
                 current_ccu += game.get('playing', 0) or 0
-
+            
         if current_ccu > current_peak:
             current_peak = current_ccu
-            save_peak(current_peak, peak_date)
+            save_peak(current_peak, now)
 
         result = {
             'current_ccu': current_ccu,
             'peak_ccu': current_peak,
             'total_visits': format_number(visits),
-            'date': peak_date,
-            'is_new_day': peak_date != today,
             'stale': False
         }
 
