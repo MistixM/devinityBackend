@@ -25,10 +25,20 @@ def save_peak(peak, date_str):
 
 @app.route('/get_game')
 def handle_game():
-    id_ = request.args.get('id')  # Avoid keyword conflict
+    id_ = request.args.get('id') 
     url = f'https://games.roblox.com/v1/games?universeIds={id_}'
     data = requests.get(url)
-    return data.json()
+
+    if data.status_code != 200:
+        return 500
+
+    response = data.json()
+
+    playing = response['data'][0].get('playing')
+    visits = response['data'][0].get('visits')
+
+    return jsonify({"playing": format_number(playing), "visits": format_number(visits)})
+
 
 @app.route('/peak_ccu', methods=['GET', 'POST'])
 def peak_ccu():
@@ -70,8 +80,20 @@ def peak_ccu():
         'current_ccu': current_ccu,
         'peak_ccu': current_peak,
         'date': peak_date,
-        'is_new_day': peak_date != today  # For client logic
+        'is_new_day': peak_date != today 
     })
+
+
+def format_number(num):
+    if num >= 1_000_000_000:
+        return f'{num/1_000_000_000:.2f}B'
+    elif num >= 1_000_000:
+        return f'{num/1_000_000:.1f}M'
+    elif num >= 1_000:
+        return f'{num/1_000:.2f}K'
+    else:
+        return str(int(num))
+    
 
 if __name__ == '__main__':
     app.run(debug=True)
