@@ -15,6 +15,10 @@ FETCH_TTL = 5
 LAST_FETCH = {}
 LAST_GOOD = {}
 
+PEAK_TTL = 10
+PEAK_LAST_FETCH = {}
+PEAK_LAST_GOOD = {}
+
 PEAK_FILE = 'peak_ccu.json'  # Persistent storage
 
 def load_peak():
@@ -75,49 +79,74 @@ def handle_game():
 
 @app.route('/peak_ccu', methods=['GET', 'POST'])
 def peak_ccu():
+
     universe_str = request.args.get('universes', '')
     if not universe_str:
         return jsonify({'error': 'No universes provided'}), 400
-    
+
     universes = [int(id.strip()) for id in universe_str.split(',') if id.strip().isdigit()]
     if not universes:
         return jsonify({'error': 'Invalid universes'}), 400
-    
+
+    cache_key = ','.join(map(str, sorted(universes)))
+    now = time.time()
+
+    if cache_key in PEAK_LAST_FETCH and now - PEAK_LAST_FETCH[cache_key] < PEAK_TTL:
+        if cache_key in PEAK_LAST_GOOD:
+            PEAK_LAST_FETCH[cache_key] = now
+            cached = PEAK_LAST_GOOD[cache_key].copy()
+            cached["stale"] = False
+            return jsonify(cached)
+
     today = datetime.now(timezone.utc).date().isoformat()
-    
     current_peak, peak_date = load_peak()
-    
+
     if peak_date != today:
         current_peak = 0
         peak_date = today
-    
-    # Batch fetch (split if >100)
+
     current_ccu = 0
-    batch_size = 100
     visits = 0
-    for i in range(0, len(universes), batch_size):
-        batch = universes[i:i+batch_size]
-        ids_str = ','.join(map(str, batch))
-        url = f'https://games.roblox.com/v1/games?universeIds={ids_str}'
-        try:
-            resp = requests.get(url).json()
-            for game in resp.get('data', []):
-                visits += game.get('visits', 0)
-                current_ccu += game.get('playing', 0)
-        except Exception:
-            pass  # Handle API errors gracefully
-    
-    if current_ccu > current_peak:
-        current_peak = current_ccu
-        save_peak(current_peak, peak_date)
-    
-    return jsonify({
-        'current_ccu': current_ccu,
-        'peak_ccu': current_peak,
-        'total_visits': format_number(visits),
-        'date': peak_date,
-        'is_new_day': peak_date != today 
-    })
+    batch_size = 100
+
+    try:
+        for i in range(0, len(universes), batch_size):
+            batch = universes[i:i+batch_size]
+            ids_str = ','.join(map(str, batch))
+            url = f'https://games.roblox.com/v1/games?universeIds={ids_str}'
+            r = requests.get(url, timeout=5)
+            r.raise_for_status()
+
+            for game in r.json().get('data', []):
+                visits += game.get('visits', 0) or 0
+                current_ccu += game.get('playing', 0) or 0
+
+        if current_ccu > current_peak:
+            current_peak = current_ccu
+            save_peak(current_peak, peak_date)
+
+        result = {
+            'current_ccu': current_ccu,
+            'peak_ccu': current_peak,
+            'total_visits': format_number(visits),
+            'date': peak_date,
+            'is_new_day': peak_date != today,
+            'stale': False
+        }
+
+        PEAK_LAST_GOOD[cache_key] = result
+        PEAK_LAST_FETCH[cache_key] = now
+        return jsonify(result)
+
+    except Exception as e:
+        if cache_key in PEAK_LAST_GOOD:
+            cached = PEAK_LAST_GOOD[cache_key].copy()
+            cached['stale'] = True
+            return jsonify(cached), 200
+
+        print(e)
+        
+        return jsonify({'error': 'Upstream unavailable'}), 503
 
 
 def format_number(num):
