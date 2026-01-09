@@ -4,11 +4,16 @@ from flask_cors import CORS
 import requests
 import json
 import os
+import time
+
 from datetime import datetime, timezone
 
 app = Flask(__name__)
 CORS(app)
 
+FETCH_TTL = 5
+LAST_FETCH = {}
+LAST_GOOD = {}
 
 PEAK_FILE = 'peak_ccu.json'  # Persistent storage
 
@@ -25,19 +30,47 @@ def save_peak(peak, date_str):
 
 @app.route('/get_game')
 def handle_game():
-    id_ = request.args.get('id') 
+    id_ = request.args.get('id')
+    if not id_:
+        return jsonify({"error": "Missing id"}), 400
+
     url = f'https://games.roblox.com/v1/games?universeIds={id_}'
-    data = requests.get(url)
 
-    if data.status_code != 200:
-        return 500
+    now = time.time()
+    if id_ in LAST_FETCH and now - LAST_FETCH[id_] < FETCH_TTL:
+        if id_ in LAST_GOOD:
+            LAST_FETCH[id_] = now
+            return jsonify(LAST_GOOD[id_])
+    
+    try:
+        r = requests.get(url, timeout=5)
+        r.raise_for_status()
+        data = r.json().get("data", [])
 
-    response = data.json()
+        if not data:
+            raise ValueError("Empty data")
 
-    playing = response['data'][0].get('playing')
-    visits = response['data'][0].get('visits')
+        game = data[0]
+        playing = game.get("playing", 0)
+        visits = game.get("visits", 0)
 
-    return jsonify({"playing": format_number(playing), "visits": format_number(visits)})
+        result = {
+            "playing": format_number(playing),
+            "visits": format_number(visits),
+            "stale": False
+        }
+
+        LAST_GOOD[id_] = result
+        LAST_FETCH[id_] = now
+        return jsonify(result)
+
+    except Exception:
+        if id_ in LAST_GOOD:
+            cached = LAST_GOOD[id_].copy()
+            cached["stale"] = True
+            return jsonify(cached), 200
+
+        return jsonify({"error": "Upstream unavailable"}), 503
 
 
 @app.route('/peak_ccu', methods=['GET', 'POST'])
@@ -85,6 +118,9 @@ def peak_ccu():
 
 
 def format_number(num):
+    if not isinstance(num, (int, float)):
+        return "0"
+
     if num >= 1_000_000_000:
         return f'{num/1_000_000_000:.2f}B'
     elif num >= 1_000_000:
