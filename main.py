@@ -1,10 +1,14 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
+
 import requests
 import json
 import os
 from datetime import datetime, timezone
 
 app = Flask(__name__)
+CORS(app)
+
 
 PEAK_FILE = 'peak_ccu.json'  # Persistent storage
 
